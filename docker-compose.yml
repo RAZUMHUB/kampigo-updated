@@ -1,0 +1,84 @@
+services:
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: lostfound_minio
+      MINIO_ROOT_PASSWORD: lostfound_minio_dev_password
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ml-service:
+    build:
+      context: .
+      dockerfile: infra/docker/ml-service.Dockerfile
+    restart: unless-stopped
+    environment:
+      VISION_MODEL_NAME: openai/clip-vit-base-patch32
+      TEXT_MODEL_NAME: sentence-transformers/all-MiniLM-L6-v2
+      OCR_ENGINE: tesseract
+      DETECTION_MODEL_NAME: yolov8n
+      ENABLE_SEGMENTATION: 'false'
+      ML_DEVICE: cpu
+    ports:
+      - '8000:8000'
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      ml-service:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://lostfound:lostfound_dev_password@lostfound-postgres-1:5432/lostfound
+      REDIS_HOST: lostfound-redis-1
+      REDIS_PORT: 6379
+      ML_SERVICE_URL: http://ml-service:8000
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET must be set}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET must be set}
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?FIELD_ENCRYPTION_KEY must be set}
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-noreply@campuslostfound.app}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-lostfound-dev}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-lostfound_minio}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-lostfound_minio_dev_password}
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://minio:9000}
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}
+      WEB_PUSH_VAPID_PUBLIC_KEY: ${WEB_PUSH_VAPID_PUBLIC_KEY:-}
+      WEB_PUSH_VAPID_PRIVATE_KEY: ${WEB_PUSH_VAPID_PRIVATE_KEY:-}
+      PORT: 4000
+    ports:
+      - '4000:4000'
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000/api/v1
+    ports:
+      - '3000:3000'
+
+volumes:
+  minio_data:

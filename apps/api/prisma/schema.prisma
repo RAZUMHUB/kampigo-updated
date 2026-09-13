@@ -1,0 +1,924 @@
+// ============================================================================
+// Lost & Found Platform - Core Database Schema
+// Multi-tenant: every row that matters is scoped by universityId.
+// pgvector is used for embedding similarity search (Stage 1 candidate retrieval).
+// ============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgvector(map: "vector"), pgcrypto]
+}
+
+// ---------------------------------------------------------------------------
+// TENANCY
+// ---------------------------------------------------------------------------
+
+model University {
+  id        String       @id @default(uuid())
+  name      String
+  slug      String       @unique
+  logoUrl   String?
+  status    TenantStatus @default(ACTIVE)
+  plan      String       @default("STANDARD")
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  domains    ApprovedEmailDomain[]
+  campuses   Campus[]
+  users      User[]
+  lostItems  LostItem[]
+  foundItems FoundItem[]
+  alerts     UniversityAlert[]
+  categories ItemCategory[]
+  auditLogs  AuditLog[]
+  rides      Ride[]
+  Rental     Rental[]
+  rentalBookings RentalBooking[]
+
+  @@map("universities")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  ONBOARDING
+}
+
+model ApprovedEmailDomain {
+  id           String     @id @default(uuid())
+  universityId String
+  university   University @relation(fields: [universityId], references: [id], onDelete: Cascade)
+  domain       String
+  createdAt    DateTime   @default(now())
+
+  @@unique([universityId, domain])
+  @@index([domain])
+  @@map("approved_email_domains")
+}
+
+model Campus {
+  id           String      @id @default(uuid())
+  universityId String
+  university   University  @relation(fields: [universityId], references: [id], onDelete: Cascade)
+  name         String
+  buildings    Building[]
+  users        User[]
+  lostItems    LostItem[]
+  foundItems   FoundItem[]
+  rides        Ride[]
+  createdAt    DateTime    @default(now())
+  Rental       Rental[]
+
+  @@index([universityId])
+  @@map("campuses")
+}
+
+model Building {
+  id        String   @id @default(uuid())
+  campusId  String
+  campus    Campus   @relation(fields: [campusId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+
+  @@index([campusId])
+  @@map("buildings")
+}
+
+model ItemCategory {
+  id           String      @id @default(uuid())
+  universityId String?
+  university   University? @relation(fields: [universityId], references: [id], onDelete: Cascade)
+  name         String
+  isGlobal     Boolean     @default(true)
+
+  @@index([universityId])
+  @@map("item_categories")
+}
+
+// ---------------------------------------------------------------------------
+// USERS & AUTH
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  STUDENT
+  STAFF
+  CAMPUS_AUTHORITY
+  UNIVERSITY_ADMIN
+  PLATFORM_SUPER_ADMIN
+}
+
+model User {
+  id                 String     @id @default(uuid())
+  universityId       String
+  university         University @relation(fields: [universityId], references: [id], onDelete: Cascade)
+  campusId           String?
+  campus             Campus?    @relation(fields: [campusId], references: [id], onDelete: SetNull)
+  institutionalEmail String     @unique
+  displayName        String
+  passwordHash       String?
+  passwordChangedAt  DateTime?
+  role               UserRole   @default(STUDENT)
+  isActive           Boolean    @default(true)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  otpChallenges     OtpChallenge[]
+  lostItems         LostItem[]
+  foundItems        FoundItem[]
+  claims            Claim[]
+  wallet            Wallet?
+  devices           Device[]
+  notifications     Notification[]
+  notificationPrefs NotificationPreference?
+  sentAlerts        UniversityAlert[]
+  chatMemberships   ConversationParticipant[]
+  messages          ChatMessage[]
+  reportsFiled      ContentReport[]           @relation("ReportsFiled")
+  reportsReceived   ContentReport[]           @relation("ReportsReceived")
+  auditLogs         AuditLog[]
+  ridesOffered      Ride[]                    @relation("RideDriver")
+  rideBookings      RidePassenger[]
+  rideMessages      RideMessage[]
+  reviewsGiven      RideReview[]              @relation("RideReviewer")
+  reviewsReceived   RideReview[]              @relation("RideReviewee")
+  Rental            Rental[]
+  rentalBookings    RentalBooking[]
+
+  @@index([universityId])
+  @@index([campusId])
+  @@map("users")
+}
+
+// OTP is intentionally its own table (not on User) so unverified registration
+// attempts don't create user rows, and so rate limiting / abuse tracking is
+// independent of account existence.
+model OtpChallenge {
+  id           String     @id @default(uuid())
+  email        String
+  universityId String
+  codeHash     String
+  purpose      OtpPurpose @default(REGISTRATION)
+  attemptsMade Int        @default(0)
+  maxAttempts  Int        @default(5)
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  requestIp    String?
+  resendCount  Int        @default(0)
+  lastSentAt   DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+  userId       String?
+  user         User?      @relation(fields: [userId], references: [id])
+
+  @@index([email, universityId])
+  @@map("otp_challenges")
+}
+
+enum OtpPurpose {
+  REGISTRATION
+  LOGIN
+  EMAIL_CHANGE
+  PASSWORD_RESET
+}
+
+// ---------------------------------------------------------------------------
+// ITEMS
+// ---------------------------------------------------------------------------
+
+enum ItemStatus {
+  ACTIVE
+  MATCHED
+  CLAIMED
+  RECOVERED
+  CLOSED
+  REMOVED
+}
+
+enum CustodyStatus {
+  WITH_FINDER
+  SUBMITTED_TO_SECURITY
+  SUBMITTED_TO_OFFICE
+  SECURED_BY_AUTHORITY
+  HANDED_OVER
+}
+
+model LostItem {
+  id           String     @id @default(uuid())
+  universityId String
+  university   University @relation(fields: [universityId], references: [id], onDelete: Cascade)
+  ownerId      String
+  owner        User       @relation(fields: [ownerId], references: [id])
+  campusId     String?
+  campus       Campus?    @relation(fields: [campusId], references: [id])
+  buildingId   String?
+
+  categoryId       String?
+  title            String
+  description      String
+  brand            String?
+  model            String?
+  primaryColor     String?
+  secondaryColor   String?
+  distinctiveMarks String?
+
+  floorOrZone    String?
+  nearbyLandmark String?
+
+  lostDate       DateTime
+  lostTimeApprox String?
+
+  // Private ownership verification details - NEVER serialized to public DTOs.
+  privateDetails Json?
+
+  status   ItemStatus @default(ACTIVE)
+  revision Int        @default(1) // bumped on every edit that affects ML relevance
+
+  images        ItemImage[]
+  claims        Claim[]
+  alerts        UniversityAlert[]
+  matchesAsLost ItemMatch[]       @relation("MatchLostItem")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([universityId, status])
+  @@index([universityId, categoryId])
+  @@map("lost_items")
+}
+
+model FoundItem {
+  id           String     @id @default(uuid())
+  universityId String
+  university   University @relation(fields: [universityId], references: [id], onDelete: Cascade)
+  finderId     String
+  finder       User       @relation(fields: [finderId], references: [id])
+  campusId     String?
+  campus       Campus?    @relation(fields: [campusId], references: [id])
+  buildingId   String?
+
+  categoryId       String?
+  title            String
+  description      String
+  brand            String?
+  model            String?
+  primaryColor     String?
+  secondaryColor   String?
+  distinctiveMarks String?
+
+  floorOrZone    String?
+  nearbyLandmark String?
+
+  foundDate       DateTime
+  foundTimeApprox String?
+
+  custodyStatus     CustodyStatus @default(WITH_FINDER)
+  authorityOffice   String?
+  storageLocation   String?
+  recoveryRefNumber String?
+
+  status   ItemStatus @default(ACTIVE)
+  revision Int        @default(1)
+
+  images         ItemImage[]
+  claims         Claim[]
+  matchesAsFound ItemMatch[] @relation("MatchFoundItem")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([universityId, status])
+  @@index([universityId, categoryId])
+  @@map("found_items")
+}
+
+model ItemImage {
+  id          String     @id @default(uuid())
+  lostItemId  String?
+  lostItem    LostItem?  @relation(fields: [lostItemId], references: [id], onDelete: Cascade)
+  foundItemId String?
+  foundItem   FoundItem? @relation(fields: [foundItemId], references: [id], onDelete: Cascade)
+
+  storageKey   String // object storage key, never a public direct path
+  order        Int     @default(0)
+  width        Int?
+  height       Int?
+  exifStripped Boolean @default(false)
+  ocrText      String?
+
+  embedding ImageEmbedding?
+
+  createdAt DateTime @default(now())
+
+  @@index([lostItemId])
+  @@index([foundItemId])
+  @@map("item_images")
+}
+
+// Per-image embedding (not averaged) - preserves instance-specific visual signal.
+model ImageEmbedding {
+  id                String                     @id @default(uuid())
+  itemImageId       String                     @unique
+  itemImage         ItemImage                  @relation(fields: [itemImageId], references: [id], onDelete: Cascade)
+  vector            Unsupported("vector(512)")
+  modelName         String // e.g. "openai/clip-vit-b32" or "facebook/dinov2-base"
+  processingVersion Int                        @default(1)
+  createdAt         DateTime                   @default(now())
+
+  @@map("image_embeddings")
+}
+
+// Text embedding of the combined title/description/attributes for an item + revision.
+model TextEmbedding {
+  id                String                     @id @default(uuid())
+  itemType          ItemKind
+  itemId            String
+  itemRevision      Int
+  vector            Unsupported("vector(384)")
+  modelName         String
+  processingVersion Int                        @default(1)
+  createdAt         DateTime                   @default(now())
+
+  @@unique([itemType, itemId, itemRevision])
+  @@map("text_embeddings")
+}
+
+enum ItemKind {
+  LOST
+  FOUND
+}
+
+// ---------------------------------------------------------------------------
+// MATCHING
+// ---------------------------------------------------------------------------
+
+enum MatchTier {
+  HIGHLY_LIKELY
+  POSSIBLE
+  WEAK
+}
+
+enum MatchStatus {
+  PENDING
+  CONFIRMED_STALE // superseded by a newer item revision, kept for audit
+  DISMISSED
+  ACTIVE
+}
+
+model ItemMatch {
+  id           String    @id @default(uuid())
+  universityId String // denormalized for isolation guard/query speed
+  lostItemId   String
+  lostItem     LostItem  @relation("MatchLostItem", fields: [lostItemId], references: [id], onDelete: Cascade)
+  foundItemId  String
+  foundItem    FoundItem @relation("MatchFoundItem", fields: [foundItemId], references: [id], onDelete: Cascade)
+
+  lostItemRevision  Int
+  foundItemRevision Int
+  processingVersion Int
+
+  tier   MatchTier
+  status MatchStatus @default(ACTIVE)
+
+  visualScore    Float?
+  textScore      Float?
+  attributeScore Float?
+  ocrScore       Float?
+  locationScore  Float?
+  timeScore      Float?
+  compositeScore Float
+
+  notifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  // Idempotency: never create duplicate match rows for the same item-pair + revision pairing.
+  @@unique([lostItemId, foundItemId, lostItemRevision, foundItemRevision])
+  @@index([universityId, status])
+  @@map("item_matches")
+}
+
+// ---------------------------------------------------------------------------
+// CLAIMS
+// ---------------------------------------------------------------------------
+
+enum ClaimStatus {
+  PENDING
+  VERIFICATION_REQUIRED
+  APPROVED
+  REJECTED
+  CANCELLED
+  HANDED_OVER
+  RECOVERY_CONFIRMED
+}
+
+model Claim {
+  id          String    @id @default(uuid())
+  foundItemId String
+  foundItem   FoundItem @relation(fields: [foundItemId], references: [id], onDelete: Cascade)
+  lostItemId  String?
+  lostItem    LostItem? @relation(fields: [lostItemId], references: [id])
+  claimantId  String
+  claimant    User      @relation(fields: [claimantId], references: [id])
+
+  status ClaimStatus @default(PENDING)
+
+  verificationQuestions ClaimVerificationQuestion[]
+  conversation          Conversation?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  decidedAt DateTime?
+
+  // DB-level guard: application logic uses a serializable transaction to ensure
+  // only one claim per foundItem ever reaches APPROVED.
+  @@index([foundItemId, status])
+  @@index([claimantId])
+  @@map("claims")
+}
+
+model ClaimVerificationQuestion {
+  id         String    @id @default(uuid())
+  claimId    String
+  claim      Claim     @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  question   String
+  answer     String? // encrypted at rest via app-layer field encryption
+  answeredAt DateTime?
+  isCorrect  Boolean?
+  createdAt  DateTime  @default(now())
+
+  @@map("claim_verification_questions")
+}
+
+// ---------------------------------------------------------------------------
+// CHAT
+// ---------------------------------------------------------------------------
+
+enum ConversationStatus {
+  OPEN
+  CLOSED
+  FLAGGED
+}
+
+model Conversation {
+  id           String                    @id @default(uuid())
+  claimId      String?                   @unique
+  claim        Claim?                    @relation(fields: [claimId], references: [id])
+  status       ConversationStatus        @default(OPEN)
+  participants ConversationParticipant[]
+  messages     ChatMessage[]
+  createdAt    DateTime                  @default(now())
+
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  joinedAt       DateTime     @default(now())
+
+  @@unique([conversationId, userId])
+  @@map("conversation_participants")
+}
+
+model ChatMessage {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id])
+  body           String
+  readBy         Json         @default("[]")
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
+  @@map("chat_messages")
+}
+
+// ---------------------------------------------------------------------------
+// WALLET (immutable ledger)
+// ---------------------------------------------------------------------------
+
+model Wallet {
+  id            String              @id @default(uuid())
+  userId        String              @unique
+  user          User                @relation(fields: [userId], references: [id])
+  universityId  String // wallets are university-platform specific
+  // balance is a DENORMALIZED cache recomputed from ledger; never authoritative alone.
+  cachedBalance Int                 @default(0) // in paise (Rs * 100) to avoid float errors
+  entries       WalletLedgerEntry[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@map("wallets")
+}
+
+enum LedgerEntryType {
+  CREDIT
+  DEBIT
+}
+
+enum LedgerEntryReason {
+  TOPUP
+  ALERT_PURCHASE
+  REFUND
+  ADMIN_ADJUSTMENT
+}
+
+enum LedgerEntryStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+model WalletLedgerEntry {
+  id               String            @id @default(uuid())
+  walletId         String
+  wallet           Wallet            @relation(fields: [walletId], references: [id])
+  type             LedgerEntryType
+  reason           LedgerEntryReason
+  amountPaise      Int // always positive; sign implied by `type`
+  status           LedgerEntryStatus @default(PENDING)
+  idempotencyKey   String            @unique
+  paymentReference String? // Razorpay payment/order id
+  description      String
+  createdAt        DateTime          @default(now())
+
+  @@index([walletId])
+  @@map("wallet_ledger_entries")
+}
+
+model RazorpayWebhookEvent {
+  id          String    @id @default(uuid())
+  eventId     String    @unique // Razorpay's event id -> prevents replay/duplicate processing
+  eventType   String
+  rawPayload  Json
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@map("razorpay_webhook_events")
+}
+
+// ---------------------------------------------------------------------------
+// UNIVERSITY-WIDE PAID ALERTS
+// ---------------------------------------------------------------------------
+
+enum AlertStatus {
+  PENDING
+  QUEUED
+  SENT
+  FAILED
+}
+
+model UniversityAlert {
+  id            String     @id @default(uuid())
+  universityId  String
+  university    University @relation(fields: [universityId], references: [id], onDelete: Cascade)
+  lostItemId    String
+  lostItem      LostItem   @relation(fields: [lostItemId], references: [id])
+  purchasedById String
+  purchasedBy   User       @relation(fields: [purchasedById], references: [id])
+
+  priceInPaise   Int    @default(2900) // Rs. 29.00
+  ledgerEntryId  String @unique
+  idempotencyKey String @unique
+
+  status         AlertStatus @default(PENDING)
+  messagePreview String // generated from the lost item, never free text from user
+
+  eligibleDeviceCount Int?
+  sentCount           Int?
+  failedCount         Int?
+
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  @@index([universityId])
+  @@index([lostItemId])
+  @@map("university_alerts")
+}
+
+// ---------------------------------------------------------------------------
+// NOTIFICATIONS & DEVICES
+// ---------------------------------------------------------------------------
+
+enum NotificationType {
+  POSSIBLE_MATCH
+  HIGH_CONFIDENCE_MATCH
+  CLAIM_RECEIVED
+  CLAIM_UPDATED
+  VERIFICATION_REQUIRED
+  NEW_CHAT_MESSAGE
+  ITEM_RECOVERED
+  UNIVERSITY_LOST_ITEM_ALERT
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+  type      NotificationType
+  title     String
+  body      String
+  data      Json?
+  dedupeKey String? // e.g. `match:{matchId}` to prevent duplicate notifications
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id                      String  @id @default(uuid())
+  userId                  String  @unique
+  user                    User    @relation(fields: [userId], references: [id])
+  matchAlertsEnabled      Boolean @default(true)
+  chatAlertsEnabled       Boolean @default(true)
+  universityAlertsEnabled Boolean @default(true)
+
+  @@map("notification_preferences")
+}
+
+enum DevicePlatform {
+  IOS
+  ANDROID
+  WEB
+}
+
+enum PushTokenStatus {
+  ACTIVE
+  EXPIRED
+  INVALID
+  REVOKED
+}
+
+model Device {
+  id           String          @id @default(uuid())
+  userId       String
+  user         User            @relation(fields: [userId], references: [id])
+  universityId String // denormalized for fast eligible-device fan-out queries
+  platform     DevicePlatform
+  pushToken    String          @unique
+  tokenStatus  PushTokenStatus @default(ACTIVE)
+  lastSeenAt   DateTime        @default(now())
+  createdAt    DateTime        @default(now())
+
+  @@index([universityId, tokenStatus])
+  @@map("devices")
+}
+
+// ---------------------------------------------------------------------------
+// ABUSE / MODERATION / AUDIT
+// ---------------------------------------------------------------------------
+
+enum ReportTargetType {
+  LOST_ITEM
+  FOUND_ITEM
+  USER
+  CHAT_MESSAGE
+}
+
+model ContentReport {
+  id             String           @id @default(uuid())
+  reporterId     String
+  reporter       User             @relation("ReportsFiled", fields: [reporterId], references: [id])
+  reportedUserId String?
+  reportedUser   User?            @relation("ReportsReceived", fields: [reportedUserId], references: [id])
+  targetType     ReportTargetType
+  targetId       String
+  reason         String
+  resolved       Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+
+  @@map("content_reports")
+}
+
+model AuditLog {
+  id           String      @id @default(uuid())
+  universityId String?
+  university   University? @relation(fields: [universityId], references: [id])
+  actorUserId  String?
+  actor        User?       @relation(fields: [actorUserId], references: [id])
+  action       String
+  targetType   String?
+  targetId     String?
+  requestId    String?
+  metadata     Json?
+  createdAt    DateTime    @default(now())
+
+  @@index([universityId, createdAt])
+  @@map("audit_logs")
+}
+
+enum RideStatus {
+  UPCOMING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  BOTH
+}
+
+enum GenderPreference {
+  ANY
+  MALE
+  FEMALE
+}
+
+model Ride {
+  id String @id @default(uuid())
+
+  universityId String
+  university   University @relation(fields: [universityId], references: [id], onDelete: Cascade)
+
+  campusId String?
+  campus   Campus? @relation(fields: [campusId], references: [id], onDelete: SetNull)
+
+  driverId String
+  driver   User   @relation("RideDriver", fields: [driverId], references: [id], onDelete: Cascade)
+
+  pickup      String
+  destination String
+
+  departureDateTime DateTime
+
+  availableSeats Int
+  pricePerSeat   Int
+
+  vehicle String
+  notes   String?
+
+  luggageAllowed Boolean @default(true)
+
+  paymentMode PaymentMode @default(BOTH)
+
+  genderPreference GenderPreference @default(ANY)
+
+  status RideStatus @default(UPCOMING)
+
+  passengers RidePassenger[]
+
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  messages   RideMessage[]
+  RideReview RideReview[]
+
+  @@index([driverId])
+  @@index([universityId])
+  @@index([campusId])
+  @@index([status])
+  @@map("rides")
+}
+
+model RidePassenger {
+  id String @id @default(uuid())
+
+  rideId String
+  ride   Ride   @relation(fields: [rideId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  otp           String?
+  otpVerifiedAt DateTime?
+
+  status RidePassengerStatus @default(JOINED)
+
+  createdAt DateTime @default(now())
+
+  @@unique([rideId, userId])
+  @@index([rideId])
+  @@index([userId])
+  @@map("ride_passengers")
+}
+
+model RideMessage {
+  id String @id @default(uuid())
+
+  rideId String
+  ride   Ride   @relation(fields: [rideId], references: [id], onDelete: Cascade)
+
+  senderId String
+  sender   User   @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  message String
+
+  createdAt DateTime @default(now())
+
+  @@index([rideId])
+  @@index([senderId])
+  @@map("ride_messages")
+}
+
+model RideReview {
+  id String @id @default(uuid())
+
+  rideId String
+  ride   Ride   @relation(fields: [rideId], references: [id], onDelete: Cascade)
+
+  reviewerId String
+  reviewer   User   @relation("RideReviewer", fields: [reviewerId], references: [id], onDelete: Cascade)
+
+  revieweeId String
+  reviewee   User   @relation("RideReviewee", fields: [revieweeId], references: [id], onDelete: Cascade)
+
+  rating  Int
+  comment String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([rideId, reviewerId, revieweeId])
+  @@index([revieweeId])
+  @@map("ride_reviews")
+}
+
+enum RidePassengerStatus {
+  JOINED
+  BOARDED
+  COMPLETED
+  CANCELLED
+}
+
+enum RentalCategory {
+  BIKE
+  CAR
+  CLOTHES
+  ELECTRONICS
+  BOOKS
+  OTHER
+}
+
+model Rental {
+  id String @id @default(uuid())
+
+  universityId String
+  university   University @relation(fields: [universityId], references: [id], onDelete: Cascade)
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  campusId String?
+  campus   Campus? @relation(fields: [campusId], references: [id], onDelete: SetNull)
+
+  category RentalCategory
+
+  title       String
+  description String
+
+  pricePerDay     Int
+  securityDeposit Int @default(0)
+
+  available Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookings RentalBooking[]
+
+  @@index([universityId])
+  @@index([ownerId])
+  @@index([category])
+  @@map("rentals")
+}
+
+enum RentalBookingStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model RentalBooking {
+  id String @id @default(uuid())
+
+  universityId String
+  university   University @relation(fields: [universityId], references: [id], onDelete: Cascade)
+
+  rentalId String
+  rental   Rental @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+
+  renterId String
+  renter   User   @relation(fields: [renterId], references: [id], onDelete: Cascade)
+
+  status RentalBookingStatus @default(ACTIVE)
+
+  createdAt  DateTime  @default(now())
+  returnedAt DateTime?
+
+  @@index([universityId])
+  @@index([rentalId])
+  @@index([renterId])
+  @@map("rental_bookings")
+}

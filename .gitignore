@@ -1,0 +1,64 @@
+# =========================
+# Dependencies
+# =========================
+node_modules/
+
+# =========================
+# Environment
+# =========================
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# =========================
+# Next.js
+# =========================
+.next/
+out/
+
+# =========================
+# Build Output
+# =========================
+dist/
+build/
+coverage/
+
+# TypeScript
+*.tsbuildinfo
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# =========================
+# Logs
+# =========================
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =========================
+# IDE
+# =========================
+.vscode/
+.idea/
+
+# =========================
+# macOS
+# =========================
+.DS_Store
+
+# =========================
+# Temporary Files
+# =========================
+*.tmp
+*.temp

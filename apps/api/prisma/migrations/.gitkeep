@@ -1,0 +1,1 @@
+Run `npx prisma migrate dev --name init` after the database is up to generate the first migration.

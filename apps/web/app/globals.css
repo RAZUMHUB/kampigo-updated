@@ -1,0 +1,29 @@
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+}
+
+body {
+  @apply bg-surface text-ink-900 font-body antialiased;
+}
+
+/* Visible focus states everywhere - accessibility requirement */
+:focus-visible {
+  outline: 2px solid theme('colors.amber.500');
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.skeleton {
+  @apply animate-pulse bg-ink-100 rounded-lg;
+}
+
+.input {
+  @apply w-full rounded-xl border border-ink-200 bg-surface-raised px-3.5 py-2.5 text-sm text-ink-900 placeholder:text-ink-300 focus:border-ink-400;
+}
