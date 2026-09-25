@@ -29,11 +29,15 @@ export interface ScorePairResult {
 export class MlClientService {
   private readonly logger = new Logger('MlClientService');
   private readonly baseUrl = process.env.ML_SERVICE_URL ?? 'http://localhost:8000';
+  private readonly serviceKey = process.env.ML_SERVICE_KEY ?? '';
 
   async embedImage(imageUrl: string, itemImageId: string): Promise<EmbedImageResult> {
     const res = await fetch(`${this.baseUrl}/v1/embed/image`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-ML-Service-Key': this.serviceKey,
+      },
       body: JSON.stringify({ image_url: imageUrl, item_image_id: itemImageId }),
     });
     if (!res.ok) throw new Error(`ML embed/image failed: ${res.status} ${await res.text()}`);
@@ -49,7 +53,10 @@ export class MlClientService {
   async embedText(text: string): Promise<EmbedTextResult> {
     const res = await fetch(`${this.baseUrl}/v1/embed/text`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-ML-Service-Key': this.serviceKey,
+      },
       body: JSON.stringify({ text }),
     });
     if (!res.ok) throw new Error(`ML embed/text failed: ${res.status} ${await res.text()}`);
@@ -69,7 +76,10 @@ export class MlClientService {
   }): Promise<ScorePairResult> {
     const res = await fetch(`${this.baseUrl}/v1/match/score`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-ML-Service-Key': this.serviceKey,
+      },
       body: JSON.stringify({
         lost_image_vectors: payload.lostImageVectors,
         found_image_vectors: payload.foundImageVectors,

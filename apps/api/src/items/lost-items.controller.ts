@@ -4,6 +4,7 @@ import { TenantGuard } from '../common/guards/tenant.guard';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { LostItemsService } from './lost-items.service';
 import { CreateLostItemDto } from './dto/create-lost-item.dto';
+import { UpdateLostItemDto } from './dto/update-lost-item.dto';
 import { SearchItemsDto } from './dto/search-items.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard)
@@ -30,7 +31,7 @@ export class LostItemsController {
   update(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
-    @Body() dto: Partial<CreateLostItemDto>,
+    @Body() dto: UpdateLostItemDto,
   ) {
     return this.service.update(id, user.id, user.universityId, dto);
   }

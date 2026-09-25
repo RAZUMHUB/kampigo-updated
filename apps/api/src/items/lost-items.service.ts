@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateLostItemDto } from './dto/create-lost-item.dto';
+import { UpdateLostItemDto } from './dto/update-lost-item.dto';
 import { SearchItemsDto } from './dto/search-items.dto';
 import { MatchingProducer } from '../matching/matching.producer';
 import { FieldEncryptionService } from '../common/encryption/field-encryption.service';
@@ -138,7 +139,7 @@ export class LostItemsService {
   }
 
   /** Edits bump `revision`, invalidating stale ML jobs/matches per the revision-handling requirement. */
-  async update(id: string, userId: string, universityId: string, patch: Partial<CreateLostItemDto>) {
+  async update(id: string, userId: string, universityId: string, patch: UpdateLostItemDto) {
     const existing = await this.prisma.lostItem.findUnique({ where: { id } });
     if (!existing || existing.universityId !== universityId) throw new NotFoundException();
     if (existing.ownerId !== userId) throw new ForbiddenException();
@@ -146,9 +147,20 @@ export class LostItemsService {
     const item = await this.prisma.lostItem.update({
       where: { id },
       data: {
-        ...patch,
+        categoryId: patch.categoryId,
+        title: patch.title,
+        description: patch.description,
+        brand: patch.brand,
+        model: patch.model,
+        primaryColor: patch.primaryColor,
+        secondaryColor: patch.secondaryColor,
+        distinctiveMarks: patch.distinctiveMarks,
+        campusId: patch.campusId,
+        buildingId: patch.buildingId,
+        floorOrZone: patch.floorOrZone,
+        nearbyLandmark: patch.nearbyLandmark,
         lostDate: patch.lostDate ? new Date(patch.lostDate) : undefined,
-        privateDetails: undefined, // private details updated via a dedicated endpoint only
+        lostTimeApprox: patch.lostTimeApprox,
         revision: { increment: 1 },
       },
     });

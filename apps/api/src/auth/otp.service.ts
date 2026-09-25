@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -207,10 +208,20 @@ export class OtpService {
       throw new BadRequestException('Incorrect verification code');
     }
 
-    await this.prisma.otpChallenge.update({
-      where: { id: challenge.id },
-      data: { consumedAt: new Date() },
+    const consumed = await this.prisma.otpChallenge.updateMany({
+      where: {
+        id: challenge.id,
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      data: {
+        consumedAt: new Date(),
+      },
     });
+
+    if (consumed.count !== 1) {
+      throw new ConflictException('OTP has already been used');
+    }
 
     return { verified: true, challengeId: challenge.id };
   }

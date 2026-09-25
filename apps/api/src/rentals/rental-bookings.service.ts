@@ -18,7 +18,9 @@ export class RentalBookingsService {
    */
   async create(renterId: string, universityId: string, rentalId: string) {
     return this.prisma.$transaction(async (tx) => {
-      const rental = await tx.rental.findUnique({ where: { id: rentalId } });
+      const rental = await tx.rental.findUnique({
+        where: { id: rentalId },
+      });
 
       if (!rental || rental.universityId !== universityId) {
         throw new NotFoundException('Rental not found');
@@ -28,24 +30,28 @@ export class RentalBookingsService {
         throw new BadRequestException('You cannot rent your own listing');
       }
 
-      if (!rental.available) {
+      const claimed = await tx.rental.updateMany({
+        where: {
+          id: rentalId,
+          universityId,
+          available: true,
+        },
+        data: {
+          available: false,
+        },
+      });
+
+      if (claimed.count !== 1) {
         throw new ConflictException('This item is not currently available');
       }
 
-      const booking = await tx.rentalBooking.create({
+      return tx.rentalBooking.create({
         data: {
           universityId,
           rentalId,
           renterId,
         },
       });
-
-      await tx.rental.update({
-        where: { id: rentalId },
-        data: { available: false },
-      });
-
-      return booking;
     });
   }
 
