@@ -4,11 +4,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: lostfound_minio
-      MINIO_ROOT_PASSWORD: lostfound_minio_dev_password
-    ports:
-      - '9000:9000'
-      - '9001:9001'
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set}
     volumes:
       - minio_data:/data
     healthcheck:
@@ -29,8 +26,8 @@ services:
       DETECTION_MODEL_NAME: yolov8n
       ENABLE_SEGMENTATION: 'false'
       ML_DEVICE: cpu
-    ports:
-      - '8000:8000'
+      ML_SERVICE_KEY: ${ML_SERVICE_KEY:?ML_SERVICE_KEY must be set}
+      TRUSTED_STORAGE_HOSTS: ${TRUSTED_STORAGE_HOSTS:-minio}
 
   api:
     build:
@@ -47,6 +44,7 @@ services:
       REDIS_HOST: lostfound-redis-1
       REDIS_PORT: 6379
       ML_SERVICE_URL: http://ml-service:8000
+      ML_SERVICE_KEY: ${ML_SERVICE_KEY:?ML_SERVICE_KEY must be set}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET must be set}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET must be set}
       FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?FIELD_ENCRYPTION_KEY must be set}
@@ -57,8 +55,8 @@ services:
       RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
       RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
       STORAGE_BUCKET: ${STORAGE_BUCKET:-lostfound-dev}
-      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-lostfound_minio}
-      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-lostfound_minio_dev_password}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?STORAGE_ACCESS_KEY must be set}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:?STORAGE_SECRET_KEY must be set}
       STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
       STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://minio:9000}
       FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}

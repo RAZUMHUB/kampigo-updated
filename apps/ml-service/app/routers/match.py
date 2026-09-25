@@ -1,6 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from ..adapters.factory import get_text_adapter
+from ..core.auth import require_ml_service_key
 from ..models.schemas import (
     ScoreCandidateRequest,
     ScoreCandidateResponse,

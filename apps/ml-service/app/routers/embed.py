@@ -1,10 +1,14 @@
 import io
 import logging
+from urllib.parse import urlparse
+
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from PIL import Image
 
+from ..core.auth import require_ml_service_key
+from ..core.config import get_settings
 from ..adapters.factory import (
     get_detection_adapter,
     get_ocr_adapter,
@@ -17,6 +21,25 @@ from ..models.schemas import (
     EmbedTextRequest,
     EmbedTextResponse,
 )
+
+def validate_storage_url(image_url: str) -> str:
+    parsed = urlparse(image_url)
+    settings = get_settings()
+
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid image URL",
+        )
+
+    if parsed.hostname.lower() not in settings.trusted_storage_hosts:
+        raise HTTPException(
+            status_code=422,
+            detail="Image URL host is not trusted",
+        )
+
+    return image_url
+
 
 router = APIRouter(
     prefix="/v1/embed",
@@ -69,16 +92,19 @@ def crop_primary_object(
 )
 async def embed_image(
     request: EmbedImageRequest,
+    _auth: None = Depends(require_ml_service_key),
 ) -> EmbedImageResponse:
     vision_adapter = get_vision_adapter()
     ocr_adapter = get_ocr_adapter()
+
+    image_url = validate_storage_url(request.image_url)
 
     async with httpx.AsyncClient(
         timeout=15.0,
     ) as client:
         try:
             response = await client.get(
-                request.image_url
+                image_url
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:
@@ -120,6 +146,7 @@ async def embed_image(
 )
 async def embed_text(
     request: EmbedTextRequest,
+    _auth: None = Depends(require_ml_service_key),
 ) -> EmbedTextResponse:
     text_adapter = get_text_adapter()
 
