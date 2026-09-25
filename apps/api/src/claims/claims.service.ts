@@ -36,6 +36,21 @@ export class ClaimsService {
       throw new BadRequestException('You cannot claim an item you reported as found');
     }
 
+    if (dto.lostItemId) {
+      const lostItem = await this.prisma.lostItem.findUnique({
+        where: { id: dto.lostItemId },
+        select: {
+          id: true,
+          universityId: true,
+          ownerId: true,
+        },
+      });
+
+      if (lostItem == null || lostItem.universityId !== universityId || lostItem.ownerId !== claimantId) {
+        throw new NotFoundException('Lost item not found');
+      }
+    }
+
     const claim = await this.prisma.claim.create({
       data: {
         foundItemId: dto.foundItemId,
@@ -161,22 +176,54 @@ export class ClaimsService {
   }
 
   async confirmRecovery(userId: string, claimId: string) {
-    const claim = await this.prisma.claim.findUnique({ where: { id: claimId } });
-    if (!claim) throw new NotFoundException();
-    if (claim.claimantId !== userId) throw new ForbiddenException();
-    if (claim.status !== 'APPROVED' && claim.status !== 'HANDED_OVER') {
-      throw new BadRequestException('Claim must be approved before recovery can be confirmed');
-    }
-
-    const updated = await this.prisma.claim.update({
+  return this.prisma.$transaction(async (tx) => {
+    const claim = await tx.claim.findUnique({
       where: { id: claimId },
-      data: { status: 'RECOVERY_CONFIRMED' },
     });
 
-    if (claim.lostItemId) {
-      await this.prisma.lostItem.update({ where: { id: claim.lostItemId }, data: { status: 'RECOVERED' } });
+    if (!claim) {
+      throw new NotFoundException();
     }
 
-    return updated;
-  }
+    if (claim.claimantId !== userId) {
+      throw new ForbiddenException();
+    }
+
+    if (claim.status !== 'APPROVED' && claim.status !== 'HANDED_OVER') {
+      throw new BadRequestException(
+        'Claim must be approved before recovery can be confirmed',
+      );
+    }
+
+    const consumed = await tx.claim.updateMany({
+      where: {
+        id: claimId,
+        claimantId: userId,
+        status: {
+          in: ['APPROVED', 'HANDED_OVER'],
+        },
+      },
+      data: {
+        status: 'RECOVERY_CONFIRMED',
+      },
+    });
+
+    if (consumed.count !== 1) {
+      throw new BadRequestException(
+        'Claim is no longer eligible for recovery confirmation',
+      );
+    }
+
+    if (claim.lostItemId) {
+      await tx.lostItem.update({
+        where: { id: claim.lostItemId },
+        data: { status: 'RECOVERED' },
+      });
+    }
+
+    return tx.claim.findUnique({
+      where: { id: claimId },
+    });
+  });
+}
 }

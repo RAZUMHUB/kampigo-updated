@@ -11,7 +11,12 @@ describe('Wallet business rules', () => {
 
   it('rejects top-up amounts below Rs. 100', async () => {
     const prismaMock: any = {
-      wallet: { upsert: jest.fn().mockResolvedValue({ id: 'wallet_1' }) },
+      wallet: {
+      upsert: jest.fn().mockResolvedValue({
+        id: 'wallet_1',
+        universityId: 'univ_1',
+      }),
+    },
       walletLedgerEntry: { findUnique: jest.fn().mockResolvedValue(null) },
     };
     const razorpayMock: any = { createOrder: jest.fn() };
@@ -28,13 +33,21 @@ describe('Wallet business rules', () => {
 
   it('accepts top-up amounts of Rs. 100 or more', async () => {
     const prismaMock: any = {
-      wallet: { upsert: jest.fn().mockResolvedValue({ id: 'wallet_1' }) },
+      wallet: {
+  upsert: jest.fn().mockResolvedValue({
+    id: 'wallet_1',
+    universityId: 'univ_1',
+  }),
+},
       walletLedgerEntry: {
-        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 'ledger_1' }),
       },
     };
-    const razorpayMock: any = { createOrder: jest.fn().mockResolvedValue({ id: 'order_1' }) };
+    const razorpayMock: any = {
+  createOrder: jest.fn().mockResolvedValue({ id: 'order_1' }),
+  getCheckoutKeyId: jest.fn().mockReturnValue('test_key_id'),
+};
     const service = new WalletService(prismaMock, razorpayMock);
 
     const result = await service.createTopupOrder('user_1', 'univ_1', 100, 'idem-3');
@@ -44,8 +57,17 @@ describe('Wallet business rules', () => {
 
   it('is idempotent: returns existing entry for a repeated idempotency key', async () => {
     const prismaMock: any = {
-      wallet: { upsert: jest.fn() },
-      walletLedgerEntry: { findUnique: jest.fn().mockResolvedValue({ id: 'existing_ledger' }) },
+      wallet: {
+      upsert: jest.fn().mockResolvedValue({
+        id: 'wallet_1',
+        universityId: 'univ_1',
+      }),
+    },
+      walletLedgerEntry: {
+  findFirst: jest.fn().mockResolvedValue({
+    id: 'existing_ledger',
+  }),
+},
     };
     const razorpayMock: any = { createOrder: jest.fn() };
     const service = new WalletService(prismaMock, razorpayMock);

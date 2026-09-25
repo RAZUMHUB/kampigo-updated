@@ -12,8 +12,8 @@ import { ChatService } from './chat.service';
 import { Logger } from '@nestjs/common';
 
 /**
- * Socket auth: the client connects with `?token=<accessToken>` (or an
- * `Authorization` header from native clients). The gateway verifies the JWT
+ * Socket auth: the client sends the access token through Socket.IO's
+ * `auth.token` handshake field. The gateway verifies the JWT
  * itself - socket.io does not go through the HTTP Nest guards pipeline - and
  * attaches the resulting user to the socket. Every subscribed event then
  * re-checks conversation membership via ChatService.assertParticipant before
@@ -32,7 +32,7 @@ export class ChatGateway implements OnGatewayConnection {
 
   handleConnection(client: Socket) {
     try {
-      const token = (client.handshake.query.token as string) ?? '';
+      const token = (client.handshake.auth?.token as string | undefined) ?? '';
       const payload = this.jwtService.verify(token, {
         secret: process.env.JWT_ACCESS_SECRET!,
       });

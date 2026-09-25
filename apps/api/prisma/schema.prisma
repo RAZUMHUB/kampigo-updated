@@ -129,6 +129,7 @@ model User {
   updatedAt          DateTime   @updatedAt
 
   otpChallenges     OtpChallenge[]
+  passwordResetTokens PasswordResetToken[]
   lostItems         LostItem[]
   foundItems        FoundItem[]
   claims            Claim[]
@@ -794,6 +795,8 @@ model RidePassenger {
 
   otp           String?
   otpVerifiedAt DateTime?
+  otpExpiresAt   DateTime?
+  otpAttempts    Int      @default(0)
 
   status RidePassengerStatus @default(JOINED)
 
@@ -921,4 +924,19 @@ model RentalBooking {
   @@index([rentalId])
   @@index([renterId])
   @@map("rental_bookings")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, expiresAt])
+  @@map("password_reset_tokens")
 }

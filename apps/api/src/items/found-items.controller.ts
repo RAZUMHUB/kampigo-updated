@@ -1,3 +1,4 @@
+import { Roles } from '../common/decorators/roles.decorator';
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
@@ -40,7 +41,8 @@ export class FoundItemsController {
   }
 
   @UseGuards(RolesGuard)
-  @Patch(':id/custody')
+@Roles('CAMPUS_AUTHORITY', 'UNIVERSITY_ADMIN')
+@Patch(':id/custody')
   updateCustody(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,

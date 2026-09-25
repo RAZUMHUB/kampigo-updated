@@ -44,10 +44,25 @@ export class MatchingService {
   }) {
     const { itemType, itemId, itemRevision, universityId } = params;
 
-    const currentRevision = await this.getCurrentRevision(itemType, itemId);
-    if (currentRevision !== itemRevision) {
+    const currentItem = await this.getCurrentRevision(itemType, itemId);
+
+    if (!currentItem) {
+      this.logger.warn(
+        `Skipping matching job for missing ${itemType} ${itemId}`,
+      );
+      return;
+    }
+
+    if (currentItem.universityId !== universityId) {
+      this.logger.warn(
+        `Skipping cross-tenant matching job for ${itemType} ${itemId}`,
+      );
+      return;
+    }
+
+    if (currentItem.revision !== itemRevision) {
       this.logger.log(
-        `Skipping stale job for ${itemType} ${itemId} rev ${itemRevision} (current: ${currentRevision})`,
+        `Skipping stale job for ${itemType} ${itemId} rev ${itemRevision} (current: ${currentItem.revision})`,
       );
       return;
     }
@@ -69,13 +84,25 @@ export class MatchingService {
     }
   }
 
-  private async getCurrentRevision(itemType: 'LOST' | 'FOUND', itemId: string): Promise<number> {
+  private async getCurrentRevision(
+    itemType: 'LOST' | 'FOUND',
+    itemId: string,
+  ): Promise<{ revision: number; universityId: string } | null> {
     if (itemType === 'LOST') {
-      const item = await this.prisma.lostItem.findUnique({ where: { id: itemId }, select: { revision: true } });
-      return item?.revision ?? -1;
+      const item = await this.prisma.lostItem.findUnique({
+        where: { id: itemId },
+        select: { revision: true, universityId: true },
+      });
+
+      return item ?? null;
     }
-    const item = await this.prisma.foundItem.findUnique({ where: { id: itemId }, select: { revision: true } });
-    return item?.revision ?? -1;
+
+    const item = await this.prisma.foundItem.findUnique({
+      where: { id: itemId },
+      select: { revision: true, universityId: true },
+    });
+
+    return item ?? null;
   }
 
   /** Generates and stores per-image + text embeddings for this item revision if missing. */
@@ -187,6 +214,16 @@ export class MatchingService {
       this.prisma.foundItem.findUnique({ where: { id: ids.foundItemId }, include: { images: { include: { embedding: true } } } }),
     ]);
     if (!lostItem || !foundItem) return;
+
+if (
+  lostItem.universityId !== universityId ||
+  foundItem.universityId !== universityId
+) {
+  this.logger.warn(
+    `Skipping cross-tenant match for lost=${ids.lostItemId} found=${ids.foundItemId}`,
+  );
+  return;
+}
 
     const lostImageVectors = lostItem.images.map((i: any) => (i.embedding as any)?.vector).filter(Boolean);
     const foundImageVectors = foundItem.images.map((i: any) => (i.embedding as any)?.vector).filter(Boolean);

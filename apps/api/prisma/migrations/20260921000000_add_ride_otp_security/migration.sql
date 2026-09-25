@@ -1,0 +1,3 @@
+ALTER TABLE "ride_passengers"
+ADD COLUMN "otpExpiresAt" TIMESTAMP(3),
+ADD COLUMN "otpAttempts" INTEGER NOT NULL DEFAULT 0;

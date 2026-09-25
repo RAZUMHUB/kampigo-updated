@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { IsInt, IsString, IsUUID, MaxLength, Min, MinLength } from 'class-validator';
 
 /** Amount is always in whole Rupees from the client; converted to paise internally. */
 export class CreateTopupOrderDto {
@@ -7,6 +7,8 @@ export class CreateTopupOrderDto {
   amountInRupees: number;
 
   @IsString()
+  @MinLength(8)
+  @MaxLength(128)
   idempotencyKey: string;
 }
 
@@ -15,5 +17,7 @@ export class PurchaseAlertDto {
   lostItemId: string;
 
   @IsString()
+  @MinLength(8)
+  @MaxLength(128)
   idempotencyKey: string;
 }

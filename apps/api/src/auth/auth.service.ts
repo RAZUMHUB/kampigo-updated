@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { OtpPurpose } from '@prisma/client';
+import { createHmac, randomBytes } from 'crypto';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { OtpService } from './otp.service';
@@ -275,78 +276,116 @@ export class AuthService {
       purpose: OtpPurpose.PASSWORD_RESET,
     });
 
-    const resetToken = this.jwtService.sign(
-      {
-        sub: user.id,
-        universityId: user.universityId,
-        purpose: 'PASSWORD_RESET',
+    const token = randomBytes(32).toString('base64url');
+    const secret = process.env.AUTH_TOKEN_HASH_SECRET;
+
+    if (!secret) {
+      throw new Error('AUTH_TOKEN_HASH_SECRET is not configured');
+    }
+
+    const tokenHash = createHmac('sha256', secret)
+      .update(token)
+      .digest('hex');
+
+    await this.prisma.passwordResetToken.deleteMany({
+      where: {
+        userId: user.id,
+        usedAt: null,
       },
-      {
-        secret: process.env.JWT_ACCESS_SECRET!,
-        expiresIn: '10m',
+    });
+
+    await this.prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
       },
-    );
+    });
 
     return {
-      resetToken,
+      resetToken: token,
     };
   }
 
   async resetPassword(resetToken: string, newPassword: string) {
-    let payload: {
-      sub: string;
-      universityId: string;
-      purpose?: string;
-    };
-
-    try {
-      payload = this.jwtService.verify(resetToken, {
-        secret: process.env.JWT_ACCESS_SECRET!,
-      });
-    } catch {
-      throw new UnauthorizedException(
-        'Password reset token has expired or is invalid',
-      );
-    }
-
-    if (payload.purpose !== 'PASSWORD_RESET') {
-      throw new UnauthorizedException('Invalid password reset token');
-    }
-
-    if (!payload.sub || !payload.universityId) {
-      throw new UnauthorizedException('Invalid password reset token');
-    }
-
     if (newPassword.length < 8 || newPassword.length > 128) {
       throw new BadRequestException(
         'Password must be between 8 and 128 characters',
       );
     }
 
-    const user = await this.prisma.user.findUnique({
+    const secret = process.env.AUTH_TOKEN_HASH_SECRET;
+
+    if (!secret) {
+      throw new Error('AUTH_TOKEN_HASH_SECRET is not configured');
+    }
+
+    const tokenHash = createHmac('sha256', secret)
+      .update(resetToken)
+      .digest('hex');
+
+    const resetRecord = await this.prisma.passwordResetToken.findUnique({
       where: {
-        id: payload.sub,
+        tokenHash,
+      },
+      include: {
+        user: true,
       },
     });
 
     if (
-      !user ||
-      !user.isActive ||
-      user.universityId !== payload.universityId
+      !resetRecord ||
+      resetRecord.usedAt ||
+      resetRecord.expiresAt.getTime() <= Date.now() ||
+      !resetRecord.user.isActive
     ) {
-      throw new UnauthorizedException('Invalid password reset request');
+      throw new UnauthorizedException(
+        'Password reset token has expired or is invalid',
+      );
     }
 
     const passwordHash = await argon2.hash(newPassword);
 
-    await this.prisma.user.update({
-      where: {
-        id: user.id,
-      },
-      data: {
-        passwordHash,
-        passwordChangedAt: new Date(),
-      },
+    const now = new Date();
+
+    await this.prisma.$transaction(async tx => {
+      const consumed = await tx.passwordResetToken.updateMany({
+        where: {
+          id: resetRecord.id,
+          usedAt: null,
+          expiresAt: {
+            gt: now,
+          },
+        },
+        data: {
+          usedAt: now,
+        },
+      });
+
+      if (consumed.count !== 1) {
+        throw new UnauthorizedException(
+          'Password reset token has expired or is invalid',
+        );
+      }
+
+      await tx.user.update({
+        where: {
+          id: resetRecord.userId,
+        },
+        data: {
+          passwordHash,
+          passwordChangedAt: now,
+        },
+      });
+
+      await tx.passwordResetToken.deleteMany({
+        where: {
+          userId: resetRecord.userId,
+          id: {
+            not: resetRecord.id,
+          },
+        },
+      });
     });
 
     return {

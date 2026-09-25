@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { RazorpayService } from './razorpay.service';
 
@@ -15,11 +21,17 @@ export class WalletService {
   ) {}
 
   async getOrCreateWallet(userId: string, universityId: string) {
-    return this.prisma.wallet.upsert({
+    const wallet = await this.prisma.wallet.upsert({
       where: { userId },
       create: { userId, universityId },
       update: {},
     });
+
+    if (wallet.universityId !== universityId) {
+      throw new ForbiddenException('Wallet does not belong to this university');
+    }
+
+    return wallet;
   }
 
   /**
@@ -66,8 +78,16 @@ export class WalletService {
 
     const wallet = await this.getOrCreateWallet(userId, universityId);
 
-    const existing = await this.prisma.walletLedgerEntry.findUnique({ where: { idempotencyKey } });
-    if (existing) return { ledgerEntryId: existing.id, alreadyExists: true };
+    const existing = await this.prisma.walletLedgerEntry.findFirst({
+      where: {
+        idempotencyKey,
+        walletId: wallet.id,
+      },
+    });
+
+    if (existing) {
+      return { ledgerEntryId: existing.id, alreadyExists: true };
+    }
 
     const order = await this.razorpay.createOrder(amountPaise, idempotencyKey);
 
@@ -133,16 +153,38 @@ export class WalletService {
    * to guard against duplicate submissions (e.g. double-tap).
    */
   async debitForAlert(userId: string, universityId: string, idempotencyKey: string) {
-    const existing = await this.prisma.walletLedgerEntry.findUnique({ where: { idempotencyKey } });
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { userId },
+    });
+
+    if (!wallet || wallet.universityId !== universityId) {
+      throw new ForbiddenException('Wallet does not belong to this university');
+    }
+
+    const existing = await this.prisma.walletLedgerEntry.findFirst({
+      where: {
+        idempotencyKey,
+        walletId: wallet.id,
+      },
+    });
+
     if (existing) return existing;
 
     return this.prisma.$transaction(
       async (tx) => {
-        const wallet = await tx.wallet.findUnique({ where: { userId } });
-        if (!wallet) throw new BadRequestException('Wallet not found');
+        const walletInTransaction = await tx.wallet.findUnique({
+          where: { userId },
+        });
+        if (!walletInTransaction) {
+          throw new BadRequestException('Wallet not found');
+        }
+
+        if (walletInTransaction.universityId !== universityId) {
+          throw new ForbiddenException('Wallet does not belong to this university');
+        }
 
         const completedEntries = await tx.walletLedgerEntry.findMany({
-          where: { walletId: wallet.id, status: 'COMPLETED' },
+          where: { walletId: walletInTransaction.id, status: 'COMPLETED' },
         });
         const balance = completedEntries.reduce(
           (sum, e) => sum + (e.type === 'CREDIT' ? e.amountPaise : -e.amountPaise),
@@ -155,7 +197,7 @@ export class WalletService {
 
         const entry = await tx.walletLedgerEntry.create({
           data: {
-            walletId: wallet.id,
+            walletId: walletInTransaction.id,
             type: 'DEBIT',
             reason: 'ALERT_PURCHASE',
             amountPaise: LOST_ITEM_ALERT_PRICE_PAISE,
@@ -166,7 +208,7 @@ export class WalletService {
         });
 
         await tx.wallet.update({
-          where: { id: wallet.id },
+          where: { id: walletInTransaction.id },
           data: { cachedBalance: { decrement: LOST_ITEM_ALERT_PRICE_PAISE } },
         });
 

@@ -94,7 +94,6 @@ export class RidesChatGateway {
     try {
       const token =
         (client.handshake.auth?.token as string | undefined) ??
-        (client.handshake.query.token as string | undefined) ??
         '';
 
       const payload = this.jwtService.verify<JwtPayload>(token, {

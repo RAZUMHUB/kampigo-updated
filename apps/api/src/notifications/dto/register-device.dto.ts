@@ -1,7 +1,7 @@
-import { IsEnum, IsString } from 'class-validator';
+import { IsEnum, IsString, MaxLength, MinLength } from 'class-validator';
 import { DevicePlatform } from '@prisma/client';
 
 export class RegisterDeviceDto {
   @IsEnum(DevicePlatform) platform: DevicePlatform;
-  @IsString() pushToken: string;
+  @IsString() @MinLength(10) @MaxLength(4096) pushToken: string;
 }

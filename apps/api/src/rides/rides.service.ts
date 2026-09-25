@@ -16,6 +16,9 @@ import { UpdateRideDto } from './dto/update-ride.dto';
 import { generateRideOtp, hashRideOtp } from './ride-otp.util';
 import { CreateReviewDto } from './dto/create-review.dto';
 
+const RIDE_OTP_TTL_MINUTES = 10;
+const RIDE_OTP_MAX_ATTEMPTS = 5;
+
 @Injectable()
 export class RidesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -418,6 +421,9 @@ export class RidesService {
     }
 
     const { code, hash } = generateRideOtp();
+    const otpExpiresAt = new Date(
+      Date.now() + RIDE_OTP_TTL_MINUTES * 60 * 1000,
+    );
 
     await this.prisma.ridePassenger.updateMany({
       where: {
@@ -427,6 +433,8 @@ export class RidesService {
       data: {
         otp: hash,
         otpVerifiedAt: null,
+        otpExpiresAt,
+        otpAttempts: 0,
       },
     });
 
@@ -482,6 +490,19 @@ export class RidesService {
       );
     }
 
+    if (
+      !passenger.otpExpiresAt ||
+      passenger.otpExpiresAt <= new Date()
+    ) {
+      throw new ForbiddenException('OTP has expired');
+    }
+
+    if (passenger.otpAttempts >= RIDE_OTP_MAX_ATTEMPTS) {
+      throw new ForbiddenException(
+        'Too many invalid OTP attempts',
+      );
+    }
+
     const expected = Buffer.from(passenger.otp, 'utf8');
     const provided = Buffer.from(hashRideOtp(otp), 'utf8');
 
@@ -489,6 +510,20 @@ export class RidesService {
       expected.length !== provided.length ||
       !timingSafeEqual(expected, provided)
     ) {
+      await this.prisma.ridePassenger.update({
+        where: {
+          rideId_userId: {
+            rideId,
+            userId,
+          },
+        },
+        data: {
+          otpAttempts: {
+            increment: 1,
+          },
+        },
+      });
+
       throw new ForbiddenException('Invalid OTP');
     }
 
@@ -501,6 +536,8 @@ export class RidesService {
       },
       data: {
         otp: null,
+        otpExpiresAt: null,
+        otpAttempts: 0,
         otpVerifiedAt: new Date(),
         status: RidePassengerStatus.BOARDED,
       },

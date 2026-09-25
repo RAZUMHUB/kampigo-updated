@@ -25,33 +25,72 @@ export class AlertsService {
     private readonly notifications: NotificationsService,
   ) {}
 
-  async purchaseAlert(userId: string, universityId: string, lostItemId: string, idempotencyKey: string) {
-    const existingAlert = await this.prisma.universityAlert.findUnique({ where: { idempotencyKey } });
+  async purchaseAlert(
+    userId: string,
+    universityId: string,
+    lostItemId: string,
+    idempotencyKey: string,
+  ) {
+    const existingAlert = await this.prisma.universityAlert.findFirst({
+      where: {
+        idempotencyKey,
+        purchasedById: userId,
+        universityId,
+      },
+    });
+
     if (existingAlert) return existingAlert;
 
-    const item = await this.prisma.lostItem.findUnique({ where: { id: lostItemId } });
-    if (!item || item.universityId !== universityId) throw new BadRequestException('Lost item not found');
-    if (item.ownerId !== userId) throw new ForbiddenException('Only the report owner may purchase this alert');
-    if (item.status !== 'ACTIVE') throw new BadRequestException('Lost item report is not active');
-
-    const cooldownStart = new Date(Date.now() - ALERT_COOLDOWN_HOURS * 60 * 60 * 1000);
-    const recentAlert = await this.prisma.universityAlert.findFirst({
-      where: { lostItemId, createdAt: { gte: cooldownStart } },
+    const conflictingAlert = await this.prisma.universityAlert.findUnique({
+      where: { idempotencyKey },
+      select: { id: true },
     });
+
+    if (conflictingAlert) {
+      throw new BadRequestException('Idempotency key has already been used');
+    }
+
+    const item = await this.prisma.lostItem.findUnique({
+      where: { id: lostItemId },
+    });
+
+    if (!item || item.universityId !== universityId) {
+      throw new BadRequestException('Lost item not found');
+    }
+
+    if (item.ownerId !== userId) {
+      throw new ForbiddenException('Only the report owner may purchase this alert');
+    }
+
+    if (item.status !== 'ACTIVE') {
+      throw new BadRequestException('Lost item report is not active');
+    }
+
+    const cooldownStart = new Date(
+      Date.now() - ALERT_COOLDOWN_HOURS * 60 * 60 * 1000,
+    );
+
+    const recentAlert = await this.prisma.universityAlert.findFirst({
+      where: {
+        lostItemId,
+        createdAt: { gte: cooldownStart },
+      },
+    });
+
     if (recentAlert) {
       throw new BadRequestException(
-        `An alert was already sent for this item recently. Please wait before sending another.`,
+        'An alert was already sent for this item recently. Please wait before sending another.',
       );
     }
 
-    // Debit happens first and atomically; if this throws (insufficient balance),
-    // no alert/notification is ever created.
-    const ledgerEntry = await this.walletService.debitForAlert(userId, universityId, idempotencyKey);
+    const ledgerEntry = await this.walletService.debitForAlert(
+      userId,
+      universityId,
+      idempotencyKey,
+    );
 
     const messagePreview = this.buildMessagePreview(item);
 
-    // The authoritative notification target is `item.universityId` (== universityId,
-    // already re-verified above) - never a client-supplied value.
     const alert = await this.prisma.universityAlert.create({
       data: {
         universityId: item.universityId,

@@ -8,7 +8,7 @@ export class DashboardService {
     private readonly prisma: PrismaService,
   ) {}
 
-  async getDashboard() {
+  async getDashboard(universityId: string) {
     const [
       lostItems,
       returnedItems,
@@ -16,17 +16,29 @@ export class DashboardService {
       recentLostItems,
       recentFoundItems,
     ] = await Promise.all([
-      this.prisma.lostItem.count(),
+      this.prisma.lostItem.count({
+        where: {
+          universityId,
+        },
+      }),
 
       this.prisma.lostItem.count({
         where: {
+          universityId,
           status: ItemStatus.RECOVERED,
         },
       }),
 
-      this.prisma.user.count(),
+      this.prisma.user.count({
+        where: {
+          universityId,
+        },
+      }),
 
       this.prisma.lostItem.findMany({
+        where: {
+          universityId,
+        },
         take: 5,
         orderBy: {
           createdAt: 'desc',
@@ -40,6 +52,9 @@ export class DashboardService {
       }),
 
       this.prisma.foundItem.findMany({
+        where: {
+          universityId,
+        },
         take: 5,
         orderBy: {
           createdAt: 'desc',

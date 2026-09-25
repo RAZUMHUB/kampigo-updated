@@ -34,7 +34,8 @@ export class EmailService {
       `,
     });
     } catch (error) {
-      console.error('EMAIL ERROR >>>', error);
+      const message = error instanceof Error ? error.message : 'Unknown email error';
+      console.error(`Email delivery failed: ${message}`);
       throw error;
     }
   }

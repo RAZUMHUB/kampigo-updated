@@ -6,7 +6,7 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import { createHash, randomInt } from 'crypto';
+import { createHmac, randomInt } from 'crypto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { OtpPurpose } from '@prisma/client';
@@ -41,7 +41,13 @@ export class OtpService {
   ) {}
 
   private hashCode(code: string): string {
-    return createHash('sha256').update(code).digest('hex');
+    const secret = process.env.OTP_HASH_SECRET;
+
+    if (!secret) {
+      throw new Error('OTP_HASH_SECRET is not configured');
+    }
+
+    return createHmac('sha256', secret).update(code).digest('hex');
   }
 
   private extractDomain(email: string): string {
@@ -68,11 +74,7 @@ export class OtpService {
     const approved = await this.prisma.approvedEmailDomain.findFirst({
       where: { universityId, domain },
     });
-    const isDevAllowed =
-      process.env.NODE_ENV !== 'production' &&
-      institutionalEmail === 'princekumar085167@gmail.com';
-
-    if (!approved && !isDevAllowed) {
+    if (!approved) {
       throw new ForbiddenException(
         'This email domain is not approved for the selected university',
       );
