@@ -24,6 +24,7 @@ router = APIRouter(
 )
 async def score_candidate(
     request: ScoreCandidateRequest,
+    _: None = Depends(require_ml_service_key),
 ) -> ScoreCandidateResponse:
     text_adapter = get_text_adapter()
 

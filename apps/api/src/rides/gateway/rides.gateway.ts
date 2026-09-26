@@ -1,3 +1,5 @@
+import { enforceSocketRateLimit } from '../../common/websocket/socket-rate-limiter';
+
 import {
   ConnectedSocket,
   MessageBody,
@@ -117,6 +119,7 @@ export class RidesGateway {
     @ConnectedSocket() client: Socket,
     @MessageBody() rideId: string,
   ) {
+    enforceSocketRateLimit(client);
     const user = this.getUser(client);
 
     await this.getAuthorizedRide(rideId, user);
@@ -136,6 +139,7 @@ export class RidesGateway {
       longitude: number;
     },
   ) {
+    enforceSocketRateLimit(client);
     const user = this.getUser(client);
     const { isDriver } = await this.getAuthorizedRide(payload.rideId, user);
 

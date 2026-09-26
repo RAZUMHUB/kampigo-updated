@@ -101,6 +101,7 @@ async def embed_image(
 
     async with httpx.AsyncClient(
         timeout=15.0,
+        follow_redirects=False,
     ) as client:
         try:
             response = await client.get(

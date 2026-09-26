@@ -10,6 +10,7 @@ import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ChatService } from './chat.service';
 import { Logger } from '@nestjs/common';
+import { enforceSocketRateLimit } from '../common/websocket/socket-rate-limiter';
 
 /**
  * Socket auth: the client sends the access token through Socket.IO's
@@ -46,6 +47,7 @@ export class ChatGateway implements OnGatewayConnection {
 
   @SubscribeMessage('join')
   async onJoin(@ConnectedSocket() client: Socket, @MessageBody() data: { conversationId: string }) {
+    enforceSocketRateLimit(client);
     const userId = (client as any).userId;
     await this.chatService.assertParticipant(userId, data.conversationId);
     client.join(data.conversationId);
@@ -56,6 +58,7 @@ export class ChatGateway implements OnGatewayConnection {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversationId: string; body: string },
   ) {
+    enforceSocketRateLimit(client);
     const userId = (client as any).userId;
     const message = await this.chatService.sendMessage(userId, data.conversationId, data.body);
     this.server.to(data.conversationId).emit('message', message);
@@ -64,6 +67,7 @@ export class ChatGateway implements OnGatewayConnection {
 
   @SubscribeMessage('read')
   async onRead(@ConnectedSocket() client: Socket, @MessageBody() data: { conversationId: string }) {
+    enforceSocketRateLimit(client);
     const userId = (client as any).userId;
     await this.chatService.markRead(userId, data.conversationId);
     this.server.to(data.conversationId).emit('read', { userId, conversationId: data.conversationId });

@@ -22,15 +22,21 @@ import { HealthModule } from './health/health.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { RidesModule } from './rides/rides.module';
 import { RentalsModule } from './rentals/rentals.module';
+import { RedisThrottlerStorage } from './common/throttling/redis-throttler.storage';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '../../.env' }),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    ThrottlerModule.forRoot({
+      throttlers: [{ ttl: 60_000, limit: 120 }],
+      storage: new RedisThrottlerStorage(),
+    }),
     BullModule.forRoot({
       connection: {
         host: process.env.REDIS_HOST ?? 'localhost',
-        port: process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379,
+        port: process.env.REDIS_PORT
+          ? parseInt(process.env.REDIS_PORT, 10)
+          : 6379,
       },
     }),
     PrismaModule,

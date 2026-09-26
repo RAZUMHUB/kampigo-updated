@@ -1,4 +1,31 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lostfound
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: lostfound
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U lostfound -d lostfound']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   minio:
     image: minio/minio:latest
     restart: unless-stopped
@@ -28,6 +55,8 @@ services:
       ML_DEVICE: cpu
       ML_SERVICE_KEY: ${ML_SERVICE_KEY:?ML_SERVICE_KEY must be set}
       TRUSTED_STORAGE_HOSTS: ${TRUSTED_STORAGE_HOSTS:-minio}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
 
   api:
     build:
@@ -39,9 +68,13 @@ services:
         condition: service_started
       minio:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://lostfound:lostfound_dev_password@lostfound-postgres-1:5432/lostfound
-      REDIS_HOST: lostfound-redis-1
+      DATABASE_URL: postgresql://lostfound:${POSTGRES_PASSWORD}@postgres:5432/lostfound
+      REDIS_HOST: redis
       REDIS_PORT: 6379
       ML_SERVICE_URL: http://ml-service:8000
       ML_SERVICE_KEY: ${ML_SERVICE_KEY:?ML_SERVICE_KEY must be set}
@@ -79,4 +112,6 @@ services:
       - '3000:3000'
 
 volumes:
+  postgres_data:
+  redis_data:
   minio_data:
