@@ -87,10 +87,11 @@ export function ReportFoundFlow() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<FormState>(INITIAL_STATE);
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
 
   const submitMutation = useMutation({
-    mutationFn: () =>
-      api.post<{ id: string }>('/found-items', {
+    mutationFn: async () => {
+      const result = await api.post<{ id: string }>('/found-items', {
         categoryId: form.categoryId || undefined,
         title: form.title,
         description: form.description,
@@ -102,7 +103,20 @@ export function ReportFoundFlow() {
         custodyStatus: form.custodyStatus,
         authorityOffice: form.authorityOffice || undefined,
         recoveryRefNumber: form.recoveryRefNumber || undefined,
-      }),
+      });
+
+      if (selectedImage) {
+        const formData = new FormData();
+        formData.append('file', selectedImage);
+
+        await api.upload(
+          `/found-items/${result.id}/images`,
+          formData,
+        );
+      }
+
+      return result;
+    },
     onSuccess: () => router.push('/report/found/success'),
   });
 
@@ -222,6 +236,17 @@ export function ReportFoundFlow() {
                         </option>
                       ))}
                     </select>
+                  </Field>
+
+                  <Field label="Item photo (optional)">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="input"
+                      onChange={(event) =>
+                        setSelectedImage(event.target.files?.[0] ?? null)
+                      }
+                    />
                   </Field>
 
                   <div className="grid gap-4 sm:grid-cols-2">

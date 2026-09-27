@@ -13,5 +13,5 @@ export interface MatchingJobPayload {
  * unique constraint on ItemMatch).
  */
 export function matchingJobId(payload: MatchingJobPayload): string {
-  return `match:${payload.itemType}:${payload.itemId}:rev${payload.itemRevision}`;
+  return `match-${payload.itemType}-${payload.itemId}-rev${payload.itemRevision}`;
 }

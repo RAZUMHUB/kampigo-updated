@@ -19,7 +19,7 @@ export class MatchingProducer {
     options?: { forceUnique?: boolean },
   ) {
     const jobId = options?.forceUnique
-      ? `${matchingJobId(payload)}:image:${randomUUID()}`
+      ? `${matchingJobId(payload)}-image-${randomUUID()}`
       : matchingJobId(payload);
 
     await this.queue.add('match-item', payload, {
